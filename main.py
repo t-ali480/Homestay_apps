@@ -16,7 +16,7 @@ while True:
     print("Select an option:")
     print("1.Add new expense")
     print("2.View expenses summary")
-    print("3.Remove expense from summary")
+    print("3.Modify existing expense")
     print("4.Exit")
 
     choice = int(input())
@@ -73,25 +73,44 @@ while True:
             print("exiting program")
             exit()
 
+    elif choice == 3:
+        expense_id = int(input("Enter the ID of the expense you want to modify: "))
+
+        cur.execute("SELECT * FROM {table_name} WHERE id = ?".format(table_name=table_name), (expense_id,))
+        expense = cur.fetchone()
+
+        if not expense:
+            print("Expense not found.")
+        else:
+            print("Current expense details:")
+            print("ID:", expense[0])
+            print("Date:", expense[1])
+            print("Description:", expense[2])
+            print("Category:", expense[3])
+            print("Price:", expense[4])
+
+            # Get new values for modification
+            new_date = input("Enter the new date(YYYY-MM-DD) (press Enter to keep the current value): ") or expense[1]
+            new_description = input("Enter the new description (press Enter to keep the current value): ") or expense[2]
+            new_category = input("Enter the new category (press Enter to keep the current value): ") or expense[3]
+            new_price = input("Enter the new price (press Enter to keep the current value): ") or expense[4]
+
+            # Update the expense in the database
+            cur.execute(
+                """UPDATE {table_name} SET Date=?, description=?, category=?, price=? WHERE id=?""".format(
+                    table_name=table_name
+                ),
+                (new_date, new_description, new_category, new_price, expense_id),
+            )
+            conn.commit()
+            print("Expense updated successfully.")
+
     else:
         print("Exiting program")
-        exit()
-    
-    '''
-    elif choice == 3:
-        cur.execute("""SELECT category, SUM(price) FROM {table_name}
-                        WHERE strftime('%m', Date) = ? AND strftime('%Y', Date) = ?
-                        GROUP BY category""".format(table_name = table_name), (month, year))
-    '''
-            
+        exit()       
 
     
     print("\n")
-''' 
-    repeat = input("Would you like to do something else (y/n)?: ")
-    # if you enter anything but yes then it will break out of the loop
-    if repeat.lower() != "y":
-        break
-'''
+
 
 conn.close()
