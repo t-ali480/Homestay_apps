@@ -1,23 +1,27 @@
-import sqlite3
+from influxdb import InfluxDBClient
 import datetime
 
-#import the databasesud
-#from /home/pudrunui/Documents/Database/expenses import expenses.db
+# Define InfluxDB connection parameters
+influx_host = 'localhost'
+influx_port = 8086
+influx_user = 'username'
+influx_password = 'password'
+influx_database = 'expenses'
 
-# define which database you want to use
-db_name = "/home/pudrunui/Documents/Homestay_apps/db_list/expenses.db"
-table_name = "expenses"
+# Connect to InfluxDB
+influx_client = InfluxDBClient(host=influx_host, port=influx_port, username=influx_user, password=influx_password, database=influx_database)
+influx_client.switch_database(influx_database)
 
-conn = sqlite3.connect(db_name)    # connect to database
-cur = conn.cursor()
+# Define measurement name
+meas_name = "expenses"
 
 while True:
-    print("Currently writing to database named: {table_name}".format(table_name = table_name))
+    print(f"Currently writing to database named: {meas_name}")
     print("Select an option:")
-    print("1.Add new expense")
-    print("2.View expenses summary")
-    print("3.Remove expense from summary")
-    print("4.Exit")
+    print("1. Add new expense")
+    print("2. View expenses summary")
+    print("3. Modify existing expense")
+    print("4. Exit")
 
     choice = int(input())
 
@@ -25,28 +29,39 @@ while True:
         date = input("Enter the date of the expense (YYYY-MM-DD): ")
         description = input("Enter the description of the expense: ")
 
-        cur.execute('''SELECT DISTINCT category FROM {table_name}'''.format(table_name = table_name))
+        cur = influx_client.query(f'''SELECT DISTINCT("category") FROM {meas_name}''')
 
-        categories = cur.fetchall()
+        categories = cur.get_points()
 
         print("Select a category by number:")
         for idx, category in enumerate(categories):
-            print(f"{idx + 1}. {category[0]}")
+            print(f"{idx + 1}. {category['category']}")
         print(f"{len(categories) + 1}. Create a new category")
               
         category_choice = int(input())
         if category_choice == len(categories) + 1:
-            category = input("Eneter the new category name: ")
+            category = input("Enter the new category name: ")
         else:
-            category = categories[category_choice - 1][0]
+            category = list(categories)[category_choice - 1]['category']
 
         price = input("Enter the price of the expense: ")
 
-        cur.execute('''INSERT INTO {table_name} (Date, description, category, price) VALUES (?, ?, ?, ?)'''.format(table_name = table_name), (date, description, category, price))
+        # Create JSON data for InfluxDB
+        json_body = [
+            {
+                "measurement": meas_name,
+                "time": date,
+                "fields": {
+                    "description": description,
+                    "category": category,
+                    "price": float(price),
+                },
+            }
+        ]
 
-        
-        conn.commit()
-    
+        # Write data to InfluxDB
+        influx_client.write_points(json_body)
+
     elif choice == 2:
         print("Select an option:")
         print("1. View all expenses")
@@ -56,42 +71,60 @@ while True:
         view_choice = int(input())
 
         if view_choice == 1:
-            cur.execute("SELECT * FROM {table_name}".format(table_name = table_name))
-            expenses = cur.fetchall()
-            for expenses in expenses:
-                print(expenses)
+            cur = influx_client.query(f"SELECT * FROM {meas_name}")
+            expenses = cur.get_points()
+            for expense in expenses:
+                print(expense)
         elif view_choice == 2:
             month = input("Enter the month (MM): ")
-            year = input(" Enter the year (YYYY): ")
-            cur.execute("""SELECT category, SUM(price) FROM {table_name}
-                        WHERE strftime('%m', Date) = ? AND strftime('%Y', Date) = ?
-                        GROUP BY category""".format(table_name = table_name), (month, year))
-            expenses = cur.fetchall()
+            year = input("Enter the year (YYYY): ")
+            cur = influx_client.query(f"""SELECT "category", SUM("price") FROM {meas_name}
+                        WHERE time >= '{year}-{month}-01' AND time < '{year}-{int(month) + 1}-01'
+                        GROUP BY "category" """)
+            expenses = cur.get_points()
             for expense in expenses:
-                print(f"Category: {expense[0]}, Total: {expense[1]}")
+                print(f"Category: {expense['category']}, Total: {expense['sum']}")
         else:
-            print("exiting program")
+            print("Exiting program")
             exit()
+
+    elif choice == 3:
+        expense_id = int(input("Enter the ID of the expense you want to modify: "))
+
+        cur = influx_client.query(f'SELECT * FROM {meas_name} WHERE "id" = {expense_id}')
+        expense = list(cur.get_points())
+
+        if not expense:
+            print("Expense not found.")
+        else:
+            expense = expense[0]
+            print("Current expense details:")
+            print("ID:", expense['id'])
+            print("Date:", expense['time'])
+            print("Description:", expense['description'])
+            print("Category:", expense['category'])
+            print("Price:", expense['price'])
+
+            # Get new values for modification
+            new_date = input("Enter the new date (YYYY-MM-DD) (press Enter to keep the current value): ") or expense['time']
+            new_description = input("Enter the new description (press Enter to keep the current value): ") or expense['description']
+            new_category = input("Enter the new category (press Enter to keep the current value): ") or expense['category']
+            new_price = input("Enter the new price (press Enter to keep the current value): ") or expense['price']
+
+            # Update the expense in the database
+            influx_client.write_points([{
+                "measurement": meas_name,
+                "tags": {"id": expense['id']},
+                "time": new_date,
+                "fields": {
+                    "description": new_description,
+                    "category": new_category,
+                    "price": float(new_price),
+                },
+            }], database=influx_database)
+            
+            print("Expense updated successfully.")
 
     else:
         print("Exiting program")
         exit()
-    
-    '''
-    elif choice == 3:
-        cur.execute("""SELECT category, SUM(price) FROM {table_name}
-                        WHERE strftime('%m', Date) = ? AND strftime('%Y', Date) = ?
-                        GROUP BY category""".format(table_name = table_name), (month, year))
-    '''
-            
-
-    
-    print("\n")
-''' 
-    repeat = input("Would you like to do something else (y/n)?: ")
-    # if you enter anything but yes then it will break out of the loop
-    if repeat.lower() != "y":
-        break
-'''
-
-conn.close()
